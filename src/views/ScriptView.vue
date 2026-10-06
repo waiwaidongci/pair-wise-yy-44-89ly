@@ -24,6 +24,21 @@ function lock() {
   store.lockBaseline()
   ElMessage.success('演出基线已锁定，后续修改将从新分支开始')
 }
+
+const spatialStatusText: Record<string, string> = {
+  ok: '路线畅通',
+  rerouted: '已按新范围绕行',
+  blocked: '排不出来',
+  review: '旧路线待复核',
+  fixed: '非走位提示',
+}
+const spatialTagType: Record<string, 'success' | 'warning' | 'danger' | 'info'> = {
+  ok: 'success',
+  rerouted: 'warning',
+  blocked: 'danger',
+  review: 'warning',
+  fixed: 'info',
+}
 </script>
 
 <template>
@@ -75,9 +90,15 @@ function lock() {
             <div class="script-meta">
               <span>责任：{{ cue.owner }}</span>
               <span>部门：{{ cue.department }}</span>
-              <span>路线：{{ cue.route.length }} 节点</span>
+              <span>生效路线：{{ store.effectiveRoute(cue.id).length }} 节点</span>
+              <el-tag size="small" :type="spatialTagType[store.statusOf(cue.id)]" effect="plain">
+                {{ spatialStatusText[store.statusOf(cue.id)] }}
+              </el-tag>
               <span v-if="cue.comments.length">留言：{{ cue.comments.length }}</span>
             </div>
+            <ul v-if="store.reportOf(cue.id)?.issues.length" class="script-issues">
+              <li v-for="(issue, i) in store.reportOf(cue.id)?.issues" :key="i">{{ issue.message }}</li>
+            </ul>
             <div class="script-actions">
               <el-button size="small" @click="store.selectedId = cue.id; $router.push('/stage')">编辑走位</el-button>
               <el-button v-if="cue.status !== '已确认'" size="small" type="primary" plain @click="confirmCue(cue.id)">确认节点</el-button>
@@ -237,6 +258,14 @@ function lock() {
   align-items: center;
   gap: 8px;
   margin-top: 12px;
+}
+
+.script-issues {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: #a93f33;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .confirmed {

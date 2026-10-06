@@ -1,12 +1,34 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useWorkshopStore } from '../stores/workshop'
+import type { CueSpatialStatus, RouteIssue } from '../spatial/types'
 
 const store = useWorkshopStore()
 const includeNotes = ref(true)
 const includeRoutes = ref(true)
 const includeComments = ref(false)
+const includeSpatial = ref(true)
+
+const statusPrint: Record<CueSpatialStatus, string> = {
+  ok: '路线畅通',
+  rerouted: '已按新范围绕行',
+  blocked: '排不出来·禁用',
+  review: '待复核·旧路线',
+  fixed: '非走位提示',
+}
+
+const sortedCues = computed(() =>
+  [...store.cues].sort((a, b) => a.time.localeCompare(b.time)).map((cue) => ({
+    cue,
+    report: store.reportOf(cue.id),
+    route: store.effectiveRoute(cue.id),
+    status: store.statusOf(cue.id) as CueSpatialStatus,
+  })),
+)
+
+const problemRows = computed(() => sortedCues.value.filter((row) => row.status === 'blocked' || row.status === 'review'))
+const generatedAt = new Date().toLocaleString('zh-CN')
 
 function print() {
   window.print()
@@ -14,26 +36,28 @@ function print() {
 
 function exportCsv() {
   const rows = [
-    ['编号', '时间码', '场景', '提示', '部门', '责任', '路线节点', '状态'],
-    ...store.cues.map((cue) => [
+    ['编号', '时间码', '场景', '提示', '部门', '责任', '空间状态', '空间问题说明', '路线节点', '状态'],
+    ...sortedCues.value.map(({ cue, status, report, route }) => [
       cue.id,
       cue.time,
       `${cue.act}/${cue.scene}`,
       cue.title,
       cue.department,
       cue.owner,
-      cue.route.map((point) => `${point.x},${point.y}`).join(' > '),
+      statusPrint[status],
+      report?.issues.map((issue: RouteIssue) => issue.message).join(' / ') ?? '',
+      route.map((point) => `${point.x},${point.y}`).join(' > '),
       cue.status,
     ]),
   ]
-  const csv = `\uFEFF${rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n')}`
+  const csv = `﻿${rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n')}`
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
   const link = document.createElement('a')
   link.href = url
   link.download = `潮汐来信-走位表-${store.revision}.csv`
   link.click()
   URL.revokeObjectURL(url)
-  ElMessage.success('走位表已导出')
+  ElMessage.success('走位表已导出（含空间状态列）')
 }
 </script>
 
@@ -43,7 +67,7 @@ function exportCsv() {
       <div>
         <p class="eyebrow">PRINT / 演出文档</p>
         <h1>走位表与执行清单</h1>
-        <p class="muted">打印版仅包含已选信息，固定 A4 横向布局，适合舞台监督工作台使用。</p>
+        <p class="muted">清单与舞台平面图共用同一套空间事实，范围一变重算结果会同步到这里。</p>
       </div>
       <div class="actions">
         <el-button @click="exportCsv">导出 CSV</el-button>
@@ -55,9 +79,20 @@ function exportCsv() {
       <strong>文档内容</strong>
       <el-checkbox v-model="includeNotes">执行说明</el-checkbox>
       <el-checkbox v-model="includeRoutes">路线坐标</el-checkbox>
+      <el-checkbox v-model="includeSpatial">空间校验结果</el-checkbox>
       <el-checkbox v-model="includeComments">未解决留言</el-checkbox>
-      <span class="print-revision">版本 {{ store.revision }} · 生成于 {{ new Date().toLocaleString('zh-CN') }}</span>
+      <span class="print-revision">版本 {{ store.revision }} · 生成于 {{ generatedAt }}</span>
     </div>
+
+    <el-alert
+      v-if="problemRows.length"
+      class="no-print print-warning"
+      type="error"
+      show-icon
+      :closable="false"
+      title="打印前必须处理：清单内仍有未弄清的空间问题"
+      :description="`${problemRows.map((row) => row.cue.id).join('、')} 已在表内标红；其中“排不出来”的走位不得作为执行依据。`"
+    />
 
     <article class="print-sheet">
       <header class="sheet-head">
@@ -72,6 +107,11 @@ function exportCsv() {
         </dl>
       </header>
 
+      <div v-if="problemRows.length" class="sheet-banner">
+        ⚠ 本版有 {{ problemRows.length }} 条走位未通过空间校验（已在表中标出），弄清前不得据此执行：
+        {{ problemRows.map((row) => `${row.cue.id} ${statusPrint[row.status]}`).join('；') }}
+      </div>
+
       <table>
         <thead>
           <tr>
@@ -80,22 +120,33 @@ function exportCsv() {
             <th>执行提示</th>
             <th>部门 / 责任</th>
             <th>时长</th>
+            <th v-if="includeSpatial">空间校验</th>
             <th>状态</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="cue in [...store.cues].sort((a, b) => a.time.localeCompare(b.time))" :key="cue.id">
-            <td class="mono">{{ cue.time }}</td>
-            <td>{{ cue.act }} / {{ cue.scene }}</td>
+          <tr v-for="row in sortedCues" :key="row.cue.id" :class="{ 'row-blocked': row.status === 'blocked', 'row-review': row.status === 'review' }">
+            <td class="mono">{{ row.cue.time }}</td>
+            <td>{{ row.cue.act }} / {{ row.cue.scene }}</td>
             <td>
-              <strong>{{ cue.id }} · {{ cue.title }}</strong>
-              <p v-if="includeNotes">{{ cue.note }}</p>
-              <small v-if="includeRoutes">路线：{{ cue.route.map((point, index) => `${index + 1}. ${point.x}/${point.y}`).join(' → ') }}</small>
-              <em v-if="includeComments && cue.comments.length">{{ cue.comments.filter((item) => !item.resolved).length }} 条未解决留言</em>
+              <strong>{{ row.cue.id }} · {{ row.cue.title }}</strong>
+              <p v-if="includeNotes">{{ row.cue.note }}</p>
+              <small v-if="includeRoutes">
+                路线：{{ row.route.map((point, index) => `${index + 1}. ${point.x}/${point.y}`).join(' → ') }}
+              </small>
+              <template v-if="includeSpatial && row.report?.issues.length">
+                <em v-for="(issue, index) in row.report.issues" :key="index" class="issue-line">✱ {{ issue.message }}</em>
+              </template>
+              <em v-if="includeComments && row.cue.comments.length">
+                {{ row.cue.comments.filter((item) => !item.resolved).length }} 条未解决留言
+              </em>
             </td>
-            <td>{{ cue.department }}<br /><small>{{ cue.owner }}</small></td>
-            <td>{{ cue.duration }} 秒</td>
-            <td>{{ cue.status }}</td>
+            <td>{{ row.cue.department }}<br /><small>{{ row.cue.owner }}</small></td>
+            <td>{{ row.cue.duration }} 秒</td>
+            <td v-if="includeSpatial">
+              <b :class="['spatial-status', `status-${row.status}`]">{{ statusPrint[row.status] }}</b>
+            </td>
+            <td>{{ row.cue.status }}</td>
           </tr>
         </tbody>
       </table>
@@ -126,6 +177,10 @@ function exportCsv() {
   margin-left: auto;
   color: #74818c;
   font-size: 12px;
+}
+
+.print-warning {
+  margin-bottom: 14px;
 }
 
 .print-sheet {
@@ -174,6 +229,17 @@ function exportCsv() {
   font-weight: 700;
 }
 
+.sheet-banner {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 2px solid #c0392b;
+  border-radius: 4px;
+  color: #922;
+  background: #fdecea;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 table {
   width: 100%;
   margin-top: 20px;
@@ -192,6 +258,18 @@ td {
   padding: 11px 8px;
   border-bottom: 1px solid #dfe5e8;
   vertical-align: top;
+}
+
+tr.row-blocked {
+  background: #fdecea;
+}
+
+tr.row-blocked td {
+  border-bottom-color: #f0c0ba;
+}
+
+tr.row-review {
+  background: #f5f0fd;
 }
 
 td strong,
@@ -215,6 +293,34 @@ td em {
   margin-top: 5px;
   color: #b05a2b;
   font-style: normal;
+}
+
+td em.issue-line {
+  color: #a93327;
+}
+
+.spatial-status {
+  font-size: 11px;
+}
+
+.spatial-status.status-ok {
+  color: #2e7d55;
+}
+
+.spatial-status.status-rerouted {
+  color: #a96914;
+}
+
+.spatial-status.status-blocked {
+  color: #b33226;
+}
+
+.spatial-status.status-review {
+  color: #6b4ea8;
+}
+
+.spatial-status.status-fixed {
+  color: #7a8791;
 }
 
 .mono {
@@ -257,6 +363,12 @@ td em {
   th {
     color: #111;
     background: #e8ecee;
+  }
+
+  tr.row-blocked,
+  tr.row-review {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
 }
 

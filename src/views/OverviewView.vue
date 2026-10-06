@@ -19,7 +19,9 @@ const { data: project } = useQuery({
 
 const pending = computed(() => store.cues.filter((cue) => cue.status !== '已确认').length)
 const comments = computed(() => store.cues.reduce((total, cue) => total + cue.comments.filter((item) => !item.resolved).length, 0))
-const totalMinutes = computed(() => Math.round(store.cues.reduce((sum, cue) => sum + cue.duration, 0) / 60))
+const blockedCount = computed(
+  () => store.cues.filter((cue) => ['blocked', 'review'].includes(store.statusOf(cue.id))).length,
+)
 const byDepartment = computed(() =>
   ['舞台', '灯光', '音响', '道具'].map((department) => ({
     department,
@@ -60,9 +62,9 @@ const nextCues = computed(() => [...store.cues].sort((a, b) => a.time.localeComp
         <small>跨部门协同处理中</small>
       </article>
       <article class="metric">
-        <span>计划时长</span>
-        <strong>{{ totalMinutes }}<small> 分</small></strong>
-        <small>当前版本 {{ store.revision }}</small>
+        <span>空间问题走位</span>
+        <strong :class="blockedCount ? 'red' : ''">{{ blockedCount }}</strong>
+        <small>排不出来 / 待复核，打印前须处理</small>
       </article>
     </div>
 
@@ -98,10 +100,16 @@ const nextCues = computed(() => [...store.cues].sort((a, b) => a.time.localeComp
             <strong>{{ item.count }}</strong>
           </div>
         </div>
-        <div class="conflict-card" :class="{ ok: store.conflicts.length === 0 }">
-          <strong>{{ store.conflicts.length ? `发现 ${store.conflicts.length} 项潜在冲突` : '未发现时间冲突' }}</strong>
-          <p>{{ store.conflicts.length ? '同一场景存在同时触发的提示，请在舞台工作区核对优先级。' : '当前提示的时间与场景编排一致。' }}</p>
-          <el-button v-if="store.conflicts.length" text type="warning" @click="$router.push('/stage')">定位冲突</el-button>
+        <div class="conflict-card" :class="{ ok: store.spatialProblemCues.length === 0 }">
+          <strong>{{ store.spatialProblemCues.length ? `发现 ${store.spatialProblemCues.length} 条走位空间问题` : '走位与当前布景/机械区无冲突' }}</strong>
+          <p>
+            {{
+              store.spatialProblemCues.length
+                ? '包括被安全间隔挡住、排不出来，以及旧路线待复核；打印清单会逐条标出，弄清前不得执行。'
+                : '所有已登记走位均绕开占用范围，同一时段也无路线交叉。'
+            }}
+          </p>
+          <el-button v-if="store.spatialProblemCues.length" text type="warning" @click="$router.push('/stage')">定位空间问题</el-button>
         </div>
       </section>
     </div>
