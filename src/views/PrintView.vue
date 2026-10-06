@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useWorkshopStore } from '../stores/workshop'
+import { useWorkshopStore, routeStatusLabel, routeStatusOf, type Cue } from '../stores/workshop'
 
 const store = useWorkshopStore()
 const includeNotes = ref(true)
 const includeRoutes = ref(true)
 const includeComments = ref(false)
+
+function statusOf(cue: Cue): string {
+  return routeStatusLabel[routeStatusOf(cue)]
+}
 
 function print() {
   window.print()
@@ -14,7 +18,7 @@ function print() {
 
 function exportCsv() {
   const rows = [
-    ['编号', '时间码', '场景', '提示', '部门', '责任', '路线节点', '状态'],
+    ['编号', '时间码', '场景', '提示', '部门', '责任', '路线节点', '路线状态', '路线问题', '状态'],
     ...store.cues.map((cue) => [
       cue.id,
       cue.time,
@@ -23,6 +27,11 @@ function exportCsv() {
       cue.department,
       cue.owner,
       cue.route.map((point) => `${point.x},${point.y}`).join(' > '),
+      statusOf(cue),
+      [
+        ...(cue.routeInfo?.length ? [`已绕过: ${cue.routeInfo.join('、')}`] : []),
+        ...(cue.routeIssues?.map((issue) => issue.detail) ?? []),
+      ].join(' / '),
       cue.status,
     ]),
   ]
@@ -89,8 +98,20 @@ function exportCsv() {
             <td>{{ cue.act }} / {{ cue.scene }}</td>
             <td>
               <strong>{{ cue.id }} · {{ cue.title }}</strong>
+              <el-tag
+                class="route-status-tag"
+                size="small"
+                :type="statusOf(cue) === '无法绕行' ? 'danger' : statusOf(cue) === '待复核' || statusOf(cue) === '交叉待确认' ? 'warning' : 'success'"
+                effect="plain"
+              >
+                路线 {{ statusOf(cue) }}
+              </el-tag>
               <p v-if="includeNotes">{{ cue.note }}</p>
               <small v-if="includeRoutes">路线：{{ cue.route.map((point, index) => `${index + 1}. ${point.x}/${point.y}`).join(' → ') }}</small>
+              <small v-if="cue.routeInfo?.length" class="route-info">已自动绕过：{{ cue.routeInfo.join('、') }}</small>
+              <em v-if="cue.routeIssues?.length" class="route-issues">
+                <span v-for="(issue, index) in cue.routeIssues" :key="index">{{ issue.detail }}</span>
+              </em>
               <em v-if="includeComments && cue.comments.length">{{ cue.comments.filter((item) => !item.resolved).length }} 条未解决留言</em>
             </td>
             <td>{{ cue.department }}<br /><small>{{ cue.owner }}</small></td>
@@ -209,6 +230,23 @@ td p {
 td small {
   margin-top: 6px;
   color: #7e8991;
+}
+
+.route-status-tag {
+  margin: 5px 0 2px;
+}
+
+.route-info {
+  color: #4a7a5a !important;
+}
+
+.route-issues {
+  margin-top: 5px;
+  color: #b04a3b !important;
+}
+
+.route-issues span {
+  display: block;
 }
 
 td em {

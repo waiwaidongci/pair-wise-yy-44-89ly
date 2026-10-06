@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useWorkshopStore } from '../stores/workshop'
+import { useWorkshopStore, routeStatusLabel, routeStatusOf } from '../stores/workshop'
 
 const store = useWorkshopStore()
 const query = ref('')
@@ -76,8 +76,12 @@ function lock() {
               <span>责任：{{ cue.owner }}</span>
               <span>部门：{{ cue.department }}</span>
               <span>路线：{{ cue.route.length }} 节点</span>
+              <span class="route-state" :class="`state-${routeStatusOf(cue)}`">路线 {{ routeStatusLabel[routeStatusOf(cue)] }}</span>
               <span v-if="cue.comments.length">留言：{{ cue.comments.length }}</span>
             </div>
+            <p v-if="cue.routeIssues?.length" class="route-issues">
+              <span v-for="(issue, index) in cue.routeIssues" :key="index">{{ issue.detail }}</span>
+            </p>
             <div class="script-actions">
               <el-button size="small" @click="store.selectedId = cue.id; $router.push('/stage')">编辑走位</el-button>
               <el-button v-if="cue.status !== '已确认'" size="small" type="primary" plain @click="confirmCue(cue.id)">确认节点</el-button>
@@ -230,6 +234,33 @@ function lock() {
   gap: 6px 14px;
   color: #7a8791;
   font-size: 11px;
+}
+
+.route-state.state-blocked {
+  color: #b04a3b;
+  font-weight: 700;
+}
+
+.route-state.state-legacy {
+  color: #8a969f;
+  font-weight: 700;
+}
+
+.route-state.state-crossing {
+  color: #c07a2e;
+  font-weight: 700;
+}
+
+.route-issues {
+  margin: 8px 0 0;
+  padding: 0;
+  color: #b04a3b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.route-issues span {
+  display: block;
 }
 
 .script-actions {
